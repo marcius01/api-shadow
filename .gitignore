@@ -1,0 +1,57 @@
+# Gradle
+.gradle/
+build/
+
+# Eclipse
+.project
+.classpath
+.settings/
+bin/
+
+# IntelliJ
+.idea
+*.ipr
+*.iml
+*.iws
+
+# NetBeans
+nb-configuration.xml
+
+# Visual Studio Code
+.vscode
+.factorypath
+
+# OSX
+.DS_Store
+
+# Vim
+*.swp
+*.swo
+
+# patch
+*.orig
+*.rej
+
+# Local environment
+.env
+
+# Plugin directory
+/.quarkus/cli/plugins/
+# TLS Certificates
+.certs/
+
+# ONNX model files (457MB — scaricati al primo avvio, non in git)
+models/
+
+# Runtime data — H2 database e dataset in-memory
+data/
+api-shadow.mv.db
+api-shadow.trace.db
+
+# Spec OpenAPI locali/interne (non distribuite con il progetto)
+src/main/resources/openapi/
+
+# AI tooling — non rilevante per il progetto
+CLAUDE.md
+.claude/
+spec-kit-files/

@@ -1,0 +1,1436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>api-shadow</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: { colors: { brand: '#6366f1' } } }
+    }
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+
+<body class="bg-gray-950 text-gray-100 min-h-screen font-mono"
+      x-data="adminApp()"
+      x-init="init()">
+
+  <!-- TOP BAR -->
+  <header class="border-b border-gray-800 px-6 py-3 flex items-center gap-4">
+    <button @click="backToList()" class="text-brand font-bold text-lg tracking-tight hover:text-indigo-400 transition-colors">api-shadow</button>
+    <!-- Breadcrumb -->
+    <template x-if="currentView !== 'list'">
+      <span class="text-gray-600 text-sm flex items-center gap-2">
+        <span>›</span>
+        <button @click="backToList()" class="text-gray-400 hover:text-white transition-colors" x-text="selectedSpec && selectedSpec.name"></button>
+        <template x-if="currentView === 'endpoint-config'">
+          <span class="flex items-center gap-2">
+            <span>›</span>
+            <span class="text-gray-300" x-text="selectedEndpoint && (selectedEndpoint.method + ' ' + selectedEndpoint.path)"></span>
+          </span>
+        </template>
+      </span>
+    </template>
+    <div class="flex items-center gap-2 text-sm ml-auto">
+      <template x-if="status">
+        <span class="flex items-center gap-2">
+          <span :class="status.status === 'ok' ? 'bg-green-500' : 'bg-red-500'"
+                class="w-2 h-2 rounded-full inline-block"></span>
+          <span class="text-gray-400" x-text="status.status"></span>
+          <span class="text-gray-600">|</span>
+          <span class="text-gray-300" x-text="status.specs + ' spec' + (status.specs !== 1 ? 's' : '')"></span>
+          <span class="text-gray-600">|</span>
+          <span class="text-gray-300" x-text="status.endpoints + ' endpoint' + (status.endpoints !== 1 ? 's' : '')"></span>
+        </span>
+      </template>
+      <template x-if="!status">
+        <span class="text-gray-600 text-xs">connecting…</span>
+      </template>
+      <!-- model status indicator -->
+      <template x-if="!mode.modelReady">
+        <span class="ml-4 text-xs text-yellow-400 border border-yellow-800 rounded px-2 py-1" title="AI model (✨ semantic) not ready yet — seeding will fall back to heuristics">⚠ AI model loading</span>
+      </template>
+      <button @click="refresh()"
+              class="ml-2 text-gray-500 hover:text-gray-200 transition-colors text-xs border border-gray-700 rounded px-2 py-1">
+        ↺ refresh
+      </button>
+    </div>
+  </header>
+
+  <!-- TOAST -->
+  <div x-show="toast"
+       x-transition
+       :class="toast && toast.type === 'ok' ? 'bg-green-900 border-green-700 text-green-200' : 'bg-red-900 border-red-700 text-red-200'"
+       class="fixed bottom-4 right-4 border rounded px-4 py-3 text-sm max-w-sm shadow-xl z-50"
+       x-text="toast && toast.msg">
+  </div>
+
+  <!-- ======================= VIEW: LIST ======================= -->
+  <div x-show="currentView === 'list'">
+    <main class="max-w-5xl mx-auto px-6 py-8 space-y-8">
+
+      <!-- LOAD SPEC -->
+      <section class="bg-gray-900 border border-gray-800 rounded-lg p-6">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-widest mb-5">Load a spec</h2>
+        <div class="flex gap-1 mb-5 bg-gray-800 rounded p-1 w-fit">
+          <button @click="uploadMode = 'file'"
+                  :class="uploadMode === 'file' ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-gray-300'"
+                  class="px-4 py-1.5 rounded text-sm transition-colors">From file</button>
+          <button @click="uploadMode = 'url'"
+                  :class="uploadMode === 'url' ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-gray-300'"
+                  class="px-4 py-1.5 rounded text-sm transition-colors">From URL</button>
+        </div>
+        <form x-show="uploadMode === 'file'" @submit.prevent="uploadFromFile()" class="space-y-4">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Name <span class="text-red-400">*</span></label>
+              <input x-model="form.name" type="text" placeholder="e.g. myapi"
+                     class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-brand" />
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Spec file <span class="text-red-400">*</span></label>
+              <input id="file-input" type="file" accept=".yaml,.yml,.json"
+                     @change="form.file = $event.target.files[0]"
+                     class="w-full text-sm text-gray-400 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:bg-gray-700 file:text-gray-200 hover:file:bg-gray-600 cursor-pointer" />
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Mock profile <span class="text-gray-600">(optional)</span></label>
+              <input id="profile-input" type="file" accept=".yaml,.yml"
+                     @change="form.profile = $event.target.files[0]"
+                     class="w-full text-sm text-gray-400 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:bg-gray-700 file:text-gray-200 hover:file:bg-gray-600 cursor-pointer" />
+            </div>
+          </div>
+          <!-- Mode selector -->
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-gray-500">Data mode:</span>
+            <div class="flex items-center gap-2">
+              <span class="text-sm" :class="form.semanticMode ? 'text-gray-500' : 'text-sky-400'">⚡</span>
+              <button type="button" @click="form.semanticMode = !form.semanticMode"
+                      class="relative w-12 h-6 rounded-full overflow-hidden transition-colors duration-200 focus:outline-none"
+                      :class="form.semanticMode ? 'bg-emerald-600' : 'bg-sky-600'">
+                <span class="absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200"
+                      :class="form.semanticMode ? 'translate-x-6' : 'translate-x-0'"></span>
+              </button>
+              <span class="text-sm" :class="form.semanticMode ? 'text-emerald-400' : 'text-gray-500'">✨</span>
+              <span class="text-xs text-gray-600" x-text="form.semanticMode ? 'semantic (AI)' : 'fast (heuristic)'"></span>
+            </div>
+          </div>
+          <button type="submit" :disabled="loading || !form.name || !form.file"
+                  class="bg-brand hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm px-5 py-2 rounded transition-colors">
+            <span x-show="!loading">Upload</span><span x-show="loading">Uploading…</span>
+          </button>
+        </form>
+        <form x-show="uploadMode === 'url'" @submit.prevent="uploadFromUrl()" class="space-y-4">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Name <span class="text-red-400">*</span></label>
+              <input x-model="form.name" type="text" placeholder="e.g. myapi"
+                     class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-brand" />
+            </div>
+            <div class="sm:col-span-2">
+              <label class="block text-xs text-gray-500 mb-1">Spec URL <span class="text-red-400">*</span></label>
+              <input x-model="form.url" type="url" placeholder="https://example.com/openapi.yaml"
+                     class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-brand" />
+            </div>
+          </div>
+          <!-- Mode selector (url form) -->
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-gray-500">Data mode:</span>
+            <div class="flex items-center gap-2">
+              <span class="text-sm" :class="form.semanticMode ? 'text-gray-500' : 'text-sky-400'">⚡</span>
+              <button type="button" @click="form.semanticMode = !form.semanticMode"
+                      class="relative w-12 h-6 rounded-full overflow-hidden transition-colors duration-200 focus:outline-none"
+                      :class="form.semanticMode ? 'bg-emerald-600' : 'bg-sky-600'">
+                <span class="absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200"
+                      :class="form.semanticMode ? 'translate-x-6' : 'translate-x-0'"></span>
+              </button>
+              <span class="text-sm" :class="form.semanticMode ? 'text-emerald-400' : 'text-gray-500'">✨</span>
+              <span class="text-xs text-gray-600" x-text="form.semanticMode ? 'semantic (AI)' : 'fast (heuristic)'"></span>
+            </div>
+          </div>
+          <button type="submit" :disabled="loading || !form.name || !form.url"
+                  class="bg-brand hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm px-5 py-2 rounded transition-colors">
+            <span x-show="!loading">Fetch & load</span><span x-show="loading">Loading…</span>
+          </button>
+        </form>
+      </section>
+
+      <!-- SPECS TABLE -->
+      <section>
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-widest mb-4">Active specs</h2>
+        <template x-if="specs.length === 0">
+          <div class="text-center py-12 text-gray-600 text-sm border border-dashed border-gray-800 rounded-lg">
+            No specs loaded yet — upload one above.
+          </div>
+        </template>
+        <template x-if="specs.length > 0">
+          <div class="border border-gray-800 rounded-lg overflow-hidden">
+            <table class="w-full text-sm">
+              <thead class="bg-gray-900 text-gray-500 text-xs uppercase tracking-wider">
+                <tr>
+                  <th class="text-left px-4 py-3">Name</th>
+                  <th class="text-left px-4 py-3">Endpoints</th>
+                  <th class="text-left px-4 py-3">Dataset</th>
+                  <th class="text-left px-4 py-3">Profile</th>
+                  <th class="text-left px-4 py-3">Updated</th>
+                  <th class="text-right px-4 py-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-800">
+                <template x-for="spec in specs" :key="spec.name">
+                  <tr class="bg-gray-900 hover:bg-gray-800 transition-colors">
+                    <td class="px-4 py-3">
+                      <span class="text-white font-semibold" x-text="spec.name"></span>
+                      <div class="text-xs text-gray-600 mt-0.5" x-text="'/api/' + spec.name + '/*'"></div>
+                    </td>
+                    <td class="px-4 py-3">
+                      <span class="text-gray-300" x-text="endpoints[spec.name] ?? '—'"></span>
+                    </td>
+                    <td class="px-4 py-3">
+                      <template x-if="spec.seeded">
+                        <span class="inline-flex items-center gap-1 text-xs bg-emerald-900 text-emerald-300 border border-emerald-700 rounded px-2 py-0.5">✓ ready</span>
+                      </template>
+                      <template x-if="!spec.seeded">
+                        <span class="inline-flex items-center gap-1 text-xs bg-yellow-950 text-yellow-400 border border-yellow-800 rounded px-2 py-0.5" title="No dataset generated yet — use the ▶ button in the Actions column">⚠ no data</span>
+                      </template>
+                    </td>
+                    <td class="px-4 py-3">
+                      <template x-if="spec.profile">
+                        <span class="inline-flex items-center gap-1 text-xs bg-indigo-900 text-indigo-300 border border-indigo-700 rounded px-2 py-0.5">✓ active</span>
+                      </template>
+                      <template x-if="!spec.profile">
+                        <span class="text-gray-700 text-xs">none</span>
+                      </template>
+                    </td>
+                    <td class="px-4 py-3 text-gray-500 text-xs" x-text="formatDate(spec.updatedAt)"></td>
+                    <td class="px-4 py-3">
+                      <div class="flex items-center justify-end gap-2">
+                        <button @click="reloadSpec(spec.name)"
+                                class="text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 rounded px-2 py-1 transition-colors"
+                                title="Hot-reload routes (also clears the generated dataset)">↺ reload</button>
+                        <button @click="reseedSpec(spec.name)"
+                                class="text-xs text-gray-400 hover:text-sky-400 border border-gray-700 hover:border-sky-700 rounded px-2 py-1 transition-colors"
+                                title="Generate dataset using the current profile. To update inferred fakers, use ⟳ Infer in the profile editor first.">
+                          ▶ generate
+                        </button>
+                        <button @click="openSpec(spec)"
+                                class="text-xs text-indigo-400 hover:text-indigo-200 border border-indigo-800 hover:border-indigo-500 rounded px-2 py-1 transition-colors"
+                                title="Open profile editor">✎ profile</button>
+                        <!-- per-spec inference mode mini toggle -->
+                        <div class="flex items-center gap-1 border-l border-gray-700 pl-2 ml-1" :title="spec.semanticMode ? 'Inference: semantic ✨ (uses AI model) — click to change' : 'Inference: heuristic ⚡ (format rules only) — click to change'">
+                          <span class="text-xs" :class="spec.semanticMode ? 'text-gray-600' : 'text-sky-400'">⚡</span>
+                          <button type="button" @click="toggleSpecMode(spec)"
+                                  class="relative w-8 h-4 rounded-full overflow-hidden transition-colors duration-200 focus:outline-none"
+                                  :class="spec.semanticMode ? 'bg-emerald-600' : 'bg-sky-700'">
+                            <span class="absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform duration-200"
+                                  :class="spec.semanticMode ? 'translate-x-4' : 'translate-x-0'"></span>
+                          </button>
+                          <span class="text-xs" :class="spec.semanticMode ? 'text-emerald-400' : 'text-gray-600'">✨</span>
+                        </div>
+                        <button @click="deleteSpec(spec.name)"
+                                class="text-xs text-gray-600 hover:text-red-400 border border-gray-800 hover:border-red-800 rounded px-2 py-1 transition-colors"
+                                title="Delete spec">🗑</button>
+                      </div>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </template>
+      </section>
+
+      <!-- ENDPOINT SUMMARY -->
+      <section x-show="specs.length > 0">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-widest mb-4">Mock endpoints</h2>
+        <div class="space-y-2">
+          <template x-for="spec in specs" :key="spec.name">
+            <div x-show="endpoints[spec.name] > 0"
+                 class="bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 text-sm">
+              <span class="text-brand font-semibold" x-text="spec.name"></span>
+              <span class="text-gray-500 mx-2">→</span>
+              <span class="text-gray-400"
+                    x-text="endpoints[spec.name] + ' endpoint' + (endpoints[spec.name] !== 1 ? 's' : '') + ' under /api/' + spec.name + '/'"></span>
+            </div>
+          </template>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ======================= VIEW: SPEC DETAIL ======================= -->
+  <div x-show="currentView === 'spec-detail'">
+    <main class="max-w-5xl mx-auto px-6 py-8 space-y-6">
+
+      <!-- Header -->
+      <div class="flex items-center justify-between">
+        <div>
+          <button @click="backToList()"
+                  class="text-xs text-gray-500 hover:text-gray-300 transition-colors mb-2 flex items-center gap-1">
+            ← back to specs
+          </button>
+          <div class="flex items-center gap-2 mt-1">
+            <h1 class="text-xl font-bold text-white" x-text="selectedSpec && selectedSpec.name"></h1>
+            <button @click="startRename()"
+                    x-show="!renaming"
+                    class="text-xs text-gray-600 hover:text-gray-300 transition-colors"
+                    title="Rename spec">✎</button>
+          </div>
+          <div x-show="renaming" class="flex items-center gap-2 mt-1">
+            <input x-model="renameValue" @keydown.enter="confirmRename()" @keydown.escape="renaming=false"
+                   class="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-indigo-500"
+                   placeholder="new name" />
+            <button @click="confirmRename()" class="text-xs bg-indigo-700 hover:bg-indigo-500 text-white rounded px-2 py-1">✓</button>
+            <button @click="renaming=false" class="text-xs text-gray-500 hover:text-gray-300">✕</button>
+          </div>
+          <p class="text-xs text-gray-500 mt-1">Profile editor</p>
+        </div>
+        <!-- Profile file controls -->
+        <div class="flex items-center gap-2">
+          <template x-if="selectedSpec && selectedSpec.profile">
+            <span class="text-xs bg-indigo-900 text-indigo-300 border border-indigo-700 rounded px-2 py-1">✓ profile active</span>
+          </template>
+          <label class="text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 rounded px-3 py-1 transition-colors cursor-pointer"
+                 :title="selectedSpec && selectedSpec.profile ? 'Replace profile file' : 'Upload YAML profile file'">
+            <span x-text="selectedSpec && selectedSpec.profile ? '↑ replace' : '+ upload profile'"></span>
+            <input type="file" accept=".yaml,.yml" class="hidden"
+                   @change="uploadProfile(selectedSpec.name, $event.target); $event.target.value=''" />
+          </label>
+          <template x-if="selectedSpec && selectedSpec.profile">
+            <button @click="downloadProfile(selectedSpec.name)"
+                    class="text-xs text-gray-400 hover:text-sky-400 border border-gray-700 hover:border-sky-700 rounded px-3 py-1 transition-colors"
+                    title="Download full YAML profile (current inference + explicit overrides)">↓ yaml</button>
+          </template>
+          <template x-if="selectedSpec && selectedSpec.profile">
+            <button @click="fillInferred(selectedSpec.name)"
+                    class="text-xs text-gray-600 hover:text-emerald-400 border border-gray-800 hover:border-emerald-800 rounded px-3 py-1 transition-colors"
+                    title="Adds inferred fakers only for fields not yet configured. Never overwrites existing settings.">⟳ infer</button>
+          </template>
+          <template x-if="selectedSpec && selectedSpec.profile">
+            <button @click="rebuildInferred(selectedSpec.name)"
+                    class="text-xs text-gray-600 hover:text-amber-400 border border-gray-800 hover:border-amber-800 rounded px-3 py-1 transition-colors"
+                    title="Clears all field fakers and recomputes them from scratch. Use only if you want to discard manual overrides and restart from inference.">⟳ re-infer</button>
+          </template>
+          <template x-if="selectedSpec && selectedSpec.profile">
+            <button @click="deleteProfile(selectedSpec.name)"
+                    class="text-xs text-gray-600 hover:text-red-400 border border-gray-800 hover:border-red-800 rounded px-3 py-1 transition-colors"
+                    title="Remove profile">✕ profile</button>
+          </template>
+        </div>
+      </div>
+
+      <!-- ── GLOBAL SETTINGS ── -->
+      <section class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-widest">Global settings</h2>
+          <button @click="saveGlobalSettings()"
+                  class="text-xs bg-brand hover:bg-indigo-500 text-white rounded px-3 py-1 transition-colors">
+            Save
+          </button>
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Language (locale) <span class="text-gray-700">override</span></label>
+            <select x-model="globalForm.locale"
+                    class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-brand">
+              <option value="">— auto-detect —</option>
+              <option value="it">🇮🇹 Italiano (it)</option>
+              <option value="en">🇬🇧 English (en)</option>
+              <option value="de">🇩🇪 Deutsch (de)</option>
+              <option value="fr">🇫🇷 Français (fr)</option>
+              <option value="es">🇪🇸 Español (es)</option>
+              <option value="pt">🇵🇹 Português (pt)</option>
+              <option value="nl">🇳🇱 Nederlands (nl)</option>
+              <option value="pl">🇵🇱 Polski (pl)</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── DATASET (N entità per risorsa) ── -->
+      <section class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-widest">Dataset</h2>
+            <p class="text-xs text-gray-600 mt-1">Number of pre-generated entities per resource (default: 20)</p>
+          </div>
+          <button @click="saveGlobalSettings()"
+                  class="text-xs bg-brand hover:bg-indigo-500 text-white rounded px-3 py-1 transition-colors">
+            Save
+          </button>
+        </div>
+        <template x-if="specResources.length === 0">
+          <p class="text-xs text-gray-600">No resources detected. Try generating the dataset first with ▶ generate.</p>
+        </template>
+        <template x-if="specResources.length > 0">
+          <div class="space-y-2">
+            <template x-for="res in specResources" :key="res.name">
+              <div class="flex items-center gap-4">
+                <span class="font-mono text-sm text-gray-200 w-48 shrink-0" x-text="res.name"></span>
+                <span class="text-xs text-gray-600 flex-1" x-text="res.listPath || ''"></span>
+                <input type="number" min="0" max="500"
+                       :value="globalForm.dataset[res.name] ?? res.count"
+                       @input="globalForm.dataset[res.name] = parseInt($event.target.value) || 0"
+                       class="w-24 bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-brand text-right" />
+                <span class="text-xs text-gray-600">entities</span>
+              </div>
+            </template>
+          </div>
+        </template>
+      </section>
+
+      <!-- ── RELAZIONI FK ── -->
+      <section class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-widest">Relations (FK)</h2>
+            <p class="text-xs text-gray-600 mt-1">Manual foreign key overrides (e.g. <span class="font-mono">orders.customerId → customers.id</span>)</p>
+          </div>
+          <button @click="saveGlobalSettings()"
+                  class="text-xs bg-brand hover:bg-indigo-500 text-white rounded px-3 py-1 transition-colors">
+            Save
+          </button>
+        </div>
+
+        <!-- Auto-detected (read-only) -->
+        <template x-if="specRelations.length > 0">
+          <div class="space-y-1">
+            <p class="text-xs text-gray-500 mb-2">Auto-detected (read-only):</p>
+            <template x-for="rel in specRelations" :key="rel.source">
+              <div class="flex items-center gap-2 text-xs font-mono text-gray-500">
+                <span x-text="rel.source"></span>
+                <span class="text-gray-700">→</span>
+                <span x-text="rel.target"></span>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <!-- Manual FK overrides -->
+        <div class="space-y-2">
+          <p class="text-xs text-gray-500">Manual overrides:</p>
+          <template x-for="(rel, idx) in globalForm.relations" :key="idx">
+            <div class="flex items-center gap-2">
+              <input type="text" placeholder="resource.field" x-model="rel.source"
+                     class="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-brand" />
+              <span class="text-gray-600">→</span>
+              <input type="text" placeholder="resource.field" x-model="rel.target"
+                     class="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-brand" />
+              <button @click="globalForm.relations.splice(idx, 1)"
+                      class="text-gray-600 hover:text-red-400 transition-colors text-lg leading-none">×</button>
+            </div>
+          </template>
+          <button @click="globalForm.relations.push({ source: '', target: '' })"
+                  class="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 rounded px-3 py-1 transition-colors">
+            + add relation
+          </button>
+        </div>
+      </section>
+
+      <!-- ── CAMPI DENORMALIZZATI ── -->
+      <section class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-widest">Denormalized fields</h2>
+            <p class="text-xs text-gray-600 mt-1">Copy a field value from another entity via FK (e.g. <span class="font-mono">orders.customerName ← customerId → customers.name</span>)</p>
+          </div>
+          <button @click="saveGlobalSettings()"
+                  class="text-xs bg-brand hover:bg-indigo-500 text-white rounded px-3 py-1 transition-colors">
+            Save
+          </button>
+        </div>
+
+        <!-- Auto-detected (read-only) -->
+        <template x-if="specDenormalized.length > 0">
+          <div class="space-y-1">
+            <p class="text-xs text-gray-500 mb-2">Auto-detected (read-only):</p>
+            <template x-for="d in specDenormalized" :key="d.source">
+              <div class="flex items-center gap-2 text-xs font-mono text-gray-500">
+                <span x-text="d.source"></span>
+                <span class="text-gray-700">←</span>
+                <span x-text="d.keyField"></span>
+                <span class="text-gray-700">→</span>
+                <span x-text="d.target"></span>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <!-- Manual denormalized overrides -->
+        <div class="space-y-2">
+          <p class="text-xs text-gray-500">Manual overrides (<span class="font-mono">resource.field</span> → <span class="font-mono">fkField->resource.field</span>):</p>
+          <template x-for="(d, idx) in globalForm.denormalized" :key="idx">
+            <div class="flex items-center gap-2">
+              <input type="text" placeholder="resource.field" x-model="d.source"
+                     class="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-brand" />
+              <span class="text-gray-600">→</span>
+              <input type="text" placeholder="fkField->resource.field" x-model="d.value"
+                     class="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-brand" />
+              <button @click="globalForm.denormalized.splice(idx, 1)"
+                      class="text-gray-600 hover:text-red-400 transition-colors text-lg leading-none">×</button>
+            </div>
+          </template>
+          <button @click="globalForm.denormalized.push({ source: '', value: '' })"
+                  class="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 rounded px-3 py-1 transition-colors">
+            + add rule
+          </button>
+        </div>
+      </section>
+
+      <!-- ── ENDPOINT OVERRIDES ── -->
+      <div>
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-widest mb-3">Override per endpoint</h2>
+        <p class="text-xs text-gray-600 mb-4">Click an endpoint to configure latency, count, and field-level fakers.</p>
+
+        <!-- Search -->
+        <div class="mb-4">
+          <input x-model="endpointSearch" type="text" placeholder="Filter by path or method…"
+                 class="w-full sm:w-80 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-brand" />
+        </div>
+
+        <!-- Loading -->
+        <template x-if="!schema">
+          <div class="text-center py-12 text-gray-600 text-sm">Loading schema…</div>
+        </template>
+
+        <!-- Endpoint list -->
+        <template x-if="schema">
+          <div class="space-y-2">
+            <template x-for="ep in filteredEndpoints()" :key="ep.method + ep.path">
+              <div class="bg-gray-900 border rounded-lg overflow-hidden transition-colors"
+                   :class="isEndpointOverridden(ep) ? 'border-indigo-800' : 'border-gray-800'">
+                <div class="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-800 transition-colors"
+                     @click="openEndpointConfig(ep)">
+                  <span class="text-xs font-bold px-2 py-0.5 rounded min-w-[52px] text-center"
+                        :class="{
+                          'bg-green-900 text-green-300': ep.method === 'GET',
+                          'bg-blue-900 text-blue-300': ep.method === 'POST',
+                          'bg-yellow-900 text-yellow-300': ep.method === 'PUT' || ep.method === 'PATCH',
+                          'bg-red-900 text-red-300': ep.method === 'DELETE',
+                          'bg-gray-700 text-gray-300': !['GET','POST','PUT','PATCH','DELETE'].includes(ep.method)
+                        }"
+                        x-text="ep.method"></span>
+                  <span class="text-gray-200 text-sm flex-1" x-text="ep.path"></span>
+                  <span class="text-xs text-gray-600"
+                        x-text="ep.hasSchema ? ep.fields.length + ' field' + (ep.fields.length !== 1 ? 's' : '') : 'no schema'"></span>
+                  <template x-if="isEndpointOverridden(ep)">
+                    <span class="w-2 h-2 rounded-full bg-indigo-400 shrink-0"></span>
+                  </template>
+                  <span class="text-gray-600 text-xs">›</span>
+                </div>
+              </div>
+            </template>
+            <template x-if="filteredEndpoints().length === 0 && schema.endpoints.length > 0">
+              <div class="text-center py-8 text-gray-600 text-sm">No endpoints match the filter.</div>
+            </template>
+          </div>
+        </template>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ======================= VIEW: ENDPOINT CONFIG ======================= -->
+  <div x-show="currentView === 'endpoint-config'">
+    <main class="max-w-4xl mx-auto px-6 py-8 space-y-6">
+
+      <!-- Header -->
+      <div class="flex items-center justify-between">
+        <div>
+          <button @click="confirmNavBack()"
+                  class="text-xs text-gray-500 hover:text-gray-300 transition-colors mb-2 flex items-center gap-1">
+            ← back to endpoints
+          </button>
+          <div class="flex items-center gap-3" x-show="selectedEndpoint">
+            <span class="text-xs font-bold px-2 py-0.5 rounded"
+                  :class="{
+                    'bg-green-900 text-green-300': selectedEndpoint && selectedEndpoint.method === 'GET',
+                    'bg-blue-900 text-blue-300': selectedEndpoint && selectedEndpoint.method === 'POST',
+                    'bg-yellow-900 text-yellow-300': selectedEndpoint && (selectedEndpoint.method === 'PUT' || selectedEndpoint.method === 'PATCH'),
+                    'bg-red-900 text-red-300': selectedEndpoint && selectedEndpoint.method === 'DELETE',
+                    'bg-gray-700 text-gray-300': selectedEndpoint && !['GET','POST','PUT','PATCH','DELETE'].includes(selectedEndpoint.method)
+                  }"
+                  x-text="selectedEndpoint && selectedEndpoint.method"></span>
+            <h1 class="text-xl font-bold text-white" x-text="selectedEndpoint && selectedEndpoint.path"></h1>
+          </div>
+        </div>
+        <!-- Dirty indicator -->
+        <template x-if="selectedEndpoint && dirtyEndpoints[endpointKey(selectedEndpoint)]">
+          <span class="text-xs text-yellow-400 flex items-center gap-1">● unsaved changes</span>
+        </template>
+      </div>
+
+      <!-- No-schema warning -->
+      <template x-if="selectedEndpoint && !selectedEndpoint.hasSchema">
+        <div class="bg-gray-900 border border-gray-700 rounded-lg p-4 text-sm text-gray-400">
+          No response schema defined for this endpoint — field-level configuration is unavailable.
+          Endpoint-level settings (latency, count, etc.) still apply.
+        </div>
+      </template>
+
+      <!-- Fixture active warning -->
+      <template x-if="selectedEndpoint && hasFixture(selectedEndpoint)">
+        <div class="bg-yellow-950 border border-yellow-800 rounded-lg p-4 text-sm text-yellow-300">
+          Static fixture active for this endpoint — raw YAML upload is required to edit fixtures.
+          Endpoint-level settings (latency, count) are still editable.
+        </div>
+      </template>
+
+      <!-- BEHAVIOR FORM -->
+      <section class="bg-gray-900 border border-gray-800 rounded-lg p-6 space-y-4">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-widest">Endpoint behavior</h2>
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Latency <span class="text-gray-700">(e.g. 200ms)</span></label>
+            <input x-model="endpointForm.latency" type="text" placeholder="200ms"
+                   @input="markDirty()"
+                   class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-brand" />
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Count <span class="text-gray-700">(array items)</span></label>
+            <input x-model="endpointForm.count" type="number" min="0" placeholder="default"
+                   @input="markDirty()"
+                   class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-brand" />
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Seed <span class="text-gray-700">(reproducible)</span></label>
+            <input x-model="endpointForm.seed" type="number" placeholder="random"
+                   @input="markDirty()"
+                   class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-brand" />
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Force status</label>
+            <input x-model="endpointForm.forceStatus" type="number" placeholder="e.g. 404"
+                   @input="markDirty()"
+                   class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-brand" />
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Optional probability <span class="text-gray-700">(0–1)</span></label>
+            <input x-model="endpointForm.optionalProbability" type="number" min="0" max="1" step="0.1" placeholder="0.7"
+                   @input="markDirty()"
+                   class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-brand" />
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Max schema depth</label>
+            <input x-model="endpointForm.maxSchemaDepth" type="number" min="1" placeholder="global default"
+                   @input="markDirty()"
+                   class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-brand" />
+          </div>
+        </div>
+      </section>
+
+      <!-- FIELDS TABLE -->
+      <template x-if="selectedEndpoint && selectedEndpoint.hasSchema && !hasFixture(selectedEndpoint)">
+        <section class="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+          <div class="px-6 py-4 border-b border-gray-800">
+            <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-widest">Field overrides</h2>
+          </div>
+
+          <div class="divide-y divide-gray-800">
+            <template x-for="field in selectedEndpoint.fields" :key="field.name">
+              <div>
+                <!-- Field row -->
+                <div class="flex items-center gap-3 px-6 py-3 hover:bg-gray-800 transition-colors cursor-pointer"
+                     @click="toggleField(field.name)">
+                  <span class="text-gray-200 text-sm flex-1 font-mono" x-text="field.name"></span>
+                  <span class="text-xs text-gray-600" x-text="field.format ? field.type + ':' + field.format : field.type"></span>
+                  <template x-if="field.required">
+                    <span class="text-xs text-red-400">required</span>
+                  </template>
+                  <!-- Mode badge -->
+                  <template x-if="getFieldMode(field.name) !== 'none'">
+                    <span class="text-xs px-2 py-0.5 rounded"
+                          :class="{
+                            'bg-purple-900 text-purple-300': getFieldMode(field.name) === 'faker',
+                            'bg-orange-900 text-orange-300': getFieldMode(field.name) === 'pattern',
+                            'bg-teal-900 text-teal-300': getFieldMode(field.name) === 'enum'
+                          }"
+                          x-text="getFieldMode(field.name)"></span>
+                  </template>
+                  <span class="text-gray-600 text-xs" x-text="expandedField === field.name ? '▲' : '▼'"></span>
+                </div>
+
+                <!-- Inline editor -->
+                <div x-show="expandedField === field.name" class="px-6 py-4 bg-gray-950 border-t border-gray-800 space-y-4">
+                  <!-- Mode selector -->
+                  <div class="flex gap-1 bg-gray-800 rounded p-1 w-fit">
+                    <template x-for="m in ['none','faker','pattern','enum']" :key="m">
+                      <button @click="setFieldMode(field.name, m); markDirty()"
+                              :class="getFieldMode(field.name) === m ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-gray-300'"
+                              class="px-3 py-1 rounded text-xs capitalize transition-colors"
+                              x-text="m"></button>
+                    </template>
+                  </div>
+
+                  <!-- Faker mode -->
+                  <div x-show="getFieldMode(field.name) === 'faker'" class="space-y-2">
+                    <label class="block text-xs text-gray-500">DataFaker expression</label>
+                    <select :value="getFieldFaker(field.name)"
+                            @change="setFieldFaker(field.name, $event.target.value); markDirty()"
+                            class="w-full sm:w-96 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-brand">
+                      <option value="">— select a faker —</option>
+                      <template x-if="field.suggestions && field.suggestions.length > 0">
+                        <option disabled>── Suggested ──────────────────</option>
+                      </template>
+                      <template x-for="s in (field.suggestions || [])" :key="'sug_' + s.expression">
+                        <option :value="s.expression"
+                                :selected="getFieldFaker(field.name) === s.expression"
+                                x-text="'✦ ' + s.label + ' (' + Math.round(s.score * 100) + '%)'"></option>
+                      </template>
+                      <template x-if="field.suggestions && field.suggestions.length > 0">
+                        <option disabled>── All ────────────────────────</option>
+                      </template>
+                      <template x-for="fc in filteredFakers(field)" :key="fc.expression">
+                        <option :value="fc.expression"
+                                :selected="getFieldFaker(field.name) === fc.expression"
+                                x-text="fc.label + '  →  ' + fc.example"></option>
+                      </template>
+                    </select>
+                    <p class="text-xs text-gray-600">Custom expression: type directly in the input above or pick from dropdown.</p>
+                  </div>
+
+                  <!-- Pattern mode -->
+                  <div x-show="getFieldMode(field.name) === 'pattern'" class="space-y-2">
+                    <label class="block text-xs text-gray-500">Regex pattern</label>
+                    <input type="text" placeholder="e.g. [A-Z]{3}[0-9]{4}"
+                           :value="getFieldPattern(field.name)"
+                           @input="setFieldPattern(field.name, $event.target.value); markDirty()"
+                           class="w-full sm:w-96 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-brand" />
+                  </div>
+
+                  <!-- Enum mode -->
+                  <div x-show="getFieldMode(field.name) === 'enum'" class="space-y-3">
+                    <label class="block text-xs text-gray-500">Values &amp; weights</label>
+                    <div class="space-y-2">
+                      <template x-for="(entry, idx) in getFieldEnumEntries(field.name)" :key="idx">
+                        <div class="flex items-center gap-2">
+                          <input type="text" placeholder="value"
+                                 :value="entry.value"
+                                 @input="updateEnumEntry(field.name, idx, 'value', $event.target.value); markDirty()"
+                                 class="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-brand" />
+                          <input type="number" placeholder="weight" min="1"
+                                 :value="entry.weight"
+                                 @input="updateEnumEntry(field.name, idx, 'weight', parseInt($event.target.value) || 1); markDirty()"
+                                 class="w-24 bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-brand" />
+                          <button @click="removeEnumEntry(field.name, idx); markDirty()"
+                                  class="text-gray-600 hover:text-red-400 transition-colors text-xs px-2 py-1.5">✕</button>
+                        </div>
+                      </template>
+                    </div>
+                    <button @click="addEnumEntry(field.name); markDirty()"
+                            class="text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 rounded px-3 py-1.5 transition-colors">
+                      + add value
+                    </button>
+                  </div>
+
+                </div>
+              </div>
+            </template>
+          </div>
+        </section>
+      </template>
+
+      <!-- SAVE -->
+      <div class="flex items-center gap-4 pb-8">
+        <button @click="saveEndpoint()" :disabled="savingEndpoint"
+                class="bg-brand hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm px-6 py-2 rounded transition-colors">
+          <span x-show="!savingEndpoint">Save</span>
+          <span x-show="savingEndpoint">Saving…</span>
+        </button>
+        <button @click="clearEndpointOverride()"
+                class="text-xs text-gray-500 hover:text-gray-300 transition-colors border border-gray-800 hover:border-gray-600 rounded px-4 py-2">
+          Clear all overrides
+        </button>
+        <template x-if="selectedEndpoint && dirtyEndpoints[endpointKey(selectedEndpoint)]">
+          <span class="text-xs text-yellow-500">● unsaved</span>
+        </template>
+      </div>
+
+    </main>
+  </div>
+
+  <script>
+    const FAKER_CATALOG = [
+      { expression: "Name.fullName",              label: "Full name",       example: "John Smith",           types: ["string"], formats: [] },
+      { expression: "Name.firstName",             label: "First name",      example: "John",                 types: ["string"], formats: [] },
+      { expression: "Name.lastName",              label: "Last name",       example: "Smith",                types: ["string"], formats: [] },
+      { expression: "Internet.emailAddress",      label: "Email address",   example: "john@example.com",     types: ["string"], formats: ["email"] },
+      { expression: "Internet.url",               label: "URL",             example: "https://example.com",  types: ["string"], formats: ["uri", "url"] },
+      { expression: "Internet.ipV4Address",       label: "IPv4 address",    example: "192.168.1.1",          types: ["string"], formats: ["ipv4"] },
+      { expression: "Internet.password",          label: "Password",        example: "s3cur3P@ss",           types: ["string"], formats: ["password"] },
+      { expression: "Internet.uuid",              label: "UUID",            example: "550e8400-e29b-41d4",   types: ["string"], formats: ["uuid"] },
+      { expression: "Address.city",               label: "City",            example: "New York",             types: ["string"], formats: [] },
+      { expression: "Address.country",            label: "Country",         example: "Italy",                types: ["string"], formats: [] },
+      { expression: "Address.streetAddress",      label: "Street address",  example: "123 Main St",          types: ["string"], formats: [] },
+      { expression: "Address.zipCode",            label: "ZIP code",        example: "10001",                types: ["string"], formats: [] },
+      { expression: "PhoneNumber.phoneNumber",    label: "Phone number",    example: "+1 555-0123",          types: ["string"], formats: ["phone"] },
+      { expression: "Company.name",               label: "Company name",    example: "Acme Corp",            types: ["string"], formats: [] },
+      { expression: "Company.industry",           label: "Industry",        example: "Technology",           types: ["string"], formats: [] },
+      { expression: "Lorem.word",                 label: "Random word",     example: "accusantium",          types: ["string"], formats: [] },
+      { expression: "Lorem.sentence",             label: "Sentence",        example: "Lorem ipsum dolor...", types: ["string"], formats: [] },
+      { expression: "Lorem.paragraph",            label: "Paragraph",       example: "Lorem ipsum...",       types: ["string"], formats: [] },
+      { expression: "Date.birthday",              label: "Date (past)",     example: "1985-03-14",           types: ["string"], formats: ["date"] },
+      { expression: "Date.future",                label: "Date (future)",   example: "2027-08-22",           types: ["string"], formats: ["date"] },
+      { expression: "Date.past",                  label: "DateTime (past)", example: "2023-11-05T14:22:00",  types: ["string"], formats: ["date-time", "datetime"] },
+      { expression: "Number.randomDigit",         label: "Single digit",    example: "7",                    types: ["integer", "number"], formats: [] },
+      { expression: "Number.numberBetween '1','1000'", label: "Number 1–1000", example: "342",              types: ["integer", "number"], formats: [] },
+      { expression: "Number.numberBetween '1','100'",  label: "Percentage 1–100", example: "67",            types: ["integer", "number"], formats: [] },
+      { expression: "Number.randomDouble '2','0','100'", label: "Decimal 0–100", example: "42.75",          types: ["number"], formats: ["float", "double"] },
+      { expression: "Bool.bool",                  label: "Boolean",         example: "true",                 types: ["boolean"], formats: [] },
+      { expression: "Address.state",              label: "State / Province",  example: "California",         types: ["string"], formats: [] },
+      { expression: "Address.stateAbbr",          label: "State abbreviation", example: "CA",               types: ["string"], formats: [] },
+      { expression: "Address.buildingNumber",     label: "Building number",   example: "42",                 types: ["string"], formats: [] },
+      { expression: "Address.latitude",           label: "Latitude",          example: "41.902782",          types: ["string", "number"], formats: ["float", "double"] },
+      { expression: "Address.longitude",          label: "Longitude",         example: "12.496366",          types: ["string", "number"], formats: ["float", "double"] },
+      { expression: "Finance.iban",               label: "IBAN",              example: "IT60X0542811101000000123456", types: ["string"], formats: [] },
+      { expression: "Finance.bic",                label: "BIC / SWIFT",       example: "DEUTDEDB",           types: ["string"], formats: [] },
+      { expression: "Commerce.productName",       label: "Product name",      example: "Ergonomic Chair",    types: ["string"], formats: [] },
+      { expression: "Number.randomDouble '2','0','9999'", label: "Amount / Price", example: "149.99",        types: ["number"], formats: ["float", "double"] }
+    ];
+
+    function adminApp() {
+      return {
+        // ── shared state ──
+        status: null,
+        specs: [],
+        endpoints: {},
+        uploadMode: 'file',
+        form: { name: '', url: '', file: null, profile: null, semanticMode: false },
+        toast: null,
+        loading: false,
+        mode: { semantic: false, modelReady: false },
+
+        // ── navigation ──
+        currentView: 'list',
+        selectedSpec: null,
+
+        // ── spec-detail ──
+        schema: null,
+        currentProfile: null,
+        endpointSearch: '',
+        specResources: [],
+        specRelations: [],
+        specDenormalized: [],
+        globalForm: { locale: '', dataset: {}, relations: [], denormalized: [] },
+        renaming: false,
+        renameValue: '',
+
+        // ── endpoint-config ──
+        selectedEndpoint: null,
+        expandedField: null,
+        endpointForm: { latency: '', count: '', seed: '', forceStatus: '', optionalProbability: '', maxSchemaDepth: '', fields: {} },
+        dirtyEndpoints: {},
+        savingEndpoint: false,
+
+        // ═══════════════════════════════════════════════════
+        // INIT & GLOBAL
+        // ═══════════════════════════════════════════════════
+
+        async init() {
+          await this.refresh();
+        },
+
+        async refresh() {
+          await Promise.all([this.loadStatus(), this.loadSpecs(), this.loadEndpoints(), this.loadMode()]);
+          // Re-sync selectedSpec from the refreshed list so profile/seeded/semanticMode stay current
+          if (this.selectedSpec) {
+            const fresh = this.specs.find(s => s.name === this.selectedSpec.name);
+            if (fresh) Object.assign(this.selectedSpec, fresh);
+          }
+        },
+
+        async loadMode() {
+          try { this.mode = await fetch('/admin/api/mode').then(r => r.json()); }
+          catch(e) {}
+        },
+
+        async toggleSpecMode(spec) {
+          const newSemantic = !spec.semanticMode;
+          const r = await fetch(`/admin/specs/${spec.name}/set-mode`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ semantic: newSemantic })
+          });
+          if (r.ok) {
+            spec.semanticMode = newSemantic;
+            const label = newSemantic ? '✨ semantic' : '⚡ fast';
+            const note = newSemantic && !this.mode.modelReady ? ' (model loading, will fall back to heuristics on next seed)' : '';
+            this.showToast(`"${spec.name}": mode set to ${label}${note}`, 'ok');
+          }
+        },
+
+        async loadStatus() {
+          try { this.status = await fetch('/admin/api/status').then(r => r.json()); }
+          catch { this.status = { status: 'error', specs: 0, endpoints: 0 }; }
+        },
+
+        async loadSpecs() {
+          try { this.specs = await fetch('/admin/specs').then(r => r.json()); }
+          catch { this.specs = []; }
+        },
+
+        async loadEndpoints() {
+          try { this.endpoints = await fetch('/admin/endpoints').then(r => r.json()); }
+          catch { this.endpoints = {}; }
+        },
+
+        // ═══════════════════════════════════════════════════
+        // LIST VIEW ACTIONS
+        // ═══════════════════════════════════════════════════
+
+        async reloadSpec(name) {
+          const r = await fetch(`/admin/specs/${name}/reload`, { method: 'POST' });
+          const data = await r.json();
+          this.showToast(r.ok ? `Reloaded "${name}" — ${data.endpoints} endpoints` : data.error, r.ok ? 'ok' : 'err');
+          await this.refresh();
+        },
+
+        async reseedSpec(name) {
+          const r = await fetch(`/admin/specs/${name}/reseed`, { method: 'POST' });
+          const data = await r.json();
+          if (r.ok) {
+            const rels = data.relations > 0 ? `, ${data.relations} FK` : '';
+            const denorm = data.denormalized > 0 ? `, ${data.denormalized} denorm` : '';
+            this.showToast(`Dataset generated for "${name}"${rels}${denorm}`, 'ok');
+          } else {
+            this.showToast(data.error ?? 'Unknown error', 'err');
+          }
+          await this.refresh();
+        },
+
+        async deleteSpec(name) {
+          if (!confirm(`Delete spec "${name}"? This cannot be undone.`)) return;
+          const r = await fetch(`/admin/specs/${name}/delete`, { method: 'POST' });
+          const data = await r.json();
+          this.showToast(r.ok ? `Deleted "${name}"` : data.error, r.ok ? 'ok' : 'err');
+          await this.refresh();
+        },
+
+        async uploadFromFile() {
+          if (!this.form.name || !this.form.file) return;
+          const fd = new FormData();
+          fd.append('name', this.form.name);
+          fd.append('file', this.form.file);
+          fd.append('semanticMode', this.form.semanticMode ? 'true' : 'false');
+          if (this.form.profile) fd.append('profile', this.form.profile);
+          this.loading = true;
+          let r, data;
+          try {
+            r = await fetch('/admin/specs/upload', { method: 'POST', body: fd });
+            data = await r.json();
+          } catch (e) {
+            this.loading = false;
+            this.showToast(`Network error: ${e.message}`, 'err');
+            return;
+          }
+          this.loading = false;
+          if (r.ok) {
+            this.showToast(`Loaded "${data.name}" — ${data.endpoints} endpoints`, 'ok');
+            this.form = { name: '', url: '', file: null, profile: null, semanticMode: false };
+            document.getElementById('file-input').value = '';
+            document.getElementById('profile-input').value = '';
+          } else {
+            this.showToast(data.error ?? data.title ?? data.details ?? `HTTP ${r.status}`, 'err');
+          }
+          await this.refresh();
+        },
+
+        async uploadFromUrl() {
+          if (!this.form.name || !this.form.url) return;
+          this.loading = true;
+          let r, data;
+          try {
+            r = await fetch('/admin/specs/upload-url', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: this.form.name, url: this.form.url, semanticMode: this.form.semanticMode })
+            });
+            data = await r.json();
+          } catch (e) {
+            this.loading = false;
+            this.showToast(`Network error: ${e.message}`, 'err');
+            return;
+          }
+          this.loading = false;
+          if (r.ok) {
+            this.showToast(`Loaded "${data.name}" — ${data.endpoints} endpoints`, 'ok');
+            this.form = { name: '', url: '', file: null, profile: null, semanticMode: false };
+          } else {
+            this.showToast(data.error ?? data.title ?? data.details ?? `HTTP ${r.status}`, 'err');
+          }
+          await this.refresh();
+        },
+
+        async uploadProfile(name, fileInput) {
+          const file = fileInput.files[0];
+          if (!file) return;
+          const fd = new FormData();
+          fd.append('profile', file);
+          const r = await fetch(`/admin/specs/${name}/profile`, { method: 'POST', body: fd });
+          const data = await r.json();
+          this.showToast(r.ok ? `Profile updated for "${name}"` : data.error, r.ok ? 'ok' : 'err');
+          if (r.ok && this.selectedSpec && this.selectedSpec.name === name) {
+            this.selectedSpec.profile = true;
+            this.currentProfile = await fetch(`/admin/specs/${name}/profile/json`).then(r => r.json()).catch(() => null);
+          }
+          await this.refresh();
+        },
+
+        downloadProfile(name) {
+          const a = document.createElement('a');
+          a.href = `/admin/specs/${name}/profile/download`;
+          a.download = `${name}-profile.yaml`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        },
+
+        async rebuildInferred(name) {
+          if (!confirm(
+            `⚠ Reset ALL fakers for "${name}"?\n\n` +
+            `What happens:\n` +
+            `  • All field fakers are CLEARED and recomputed from scratch\n` +
+            `  • This includes fakers you set manually in the profile editor\n\n` +
+            `What is preserved:\n` +
+            `  • Locale, dataset counts, latency, count, seed, forceStatus per endpoint\n` +
+            `  • FK relations and denormalized fields\n\n` +
+            `To add only missing fields without losing your overrides, use "⟳ infer" instead.`
+          )) return;
+          const r = await fetch(`/admin/specs/${name}/profile/rebuild-inferred`, { method: 'POST' });
+          const data = await r.json().catch(() => ({}));
+          if (r.ok) {
+            this.showToast(`Inference reset for "${name}"`, 'ok');
+            if (this.selectedSpec && this.selectedSpec.name === name) {
+              this.currentProfile = await fetch(`/admin/specs/${name}/profile/json`).then(r => r.json()).catch(() => null);
+              const p = this.currentProfile || {};
+              this.globalForm.locale = p.locale || '';
+              this.globalForm.dataset = Object.assign({}, p.dataset || {});
+              this.globalForm.relations = Object.entries(p.relations || {}).map(([s, t]) => ({ source: s, target: t }));
+              this.globalForm.denormalized = Object.entries(p.denormalized || {}).map(([s, v]) => ({ source: s, value: v }));
+            }
+          } else {
+            this.showToast(data.error ?? 'Error resetting inference', 'err');
+          }
+        },
+
+        async fillInferred(name) {
+          const spec = this.specs.find(s => s.name === name);
+          const modeLabel = spec?.semanticMode ? '✨ semantic' : '⚡ heuristic';
+          const r = await fetch(`/admin/specs/${name}/profile/fill-inferred`, { method: 'POST' });
+          const data = await r.json().catch(() => ({}));
+          if (r.ok) {
+            const degraded = spec?.semanticMode && !data.effectiveSemantic
+              ? ' (model not ready, heuristics used)' : '';
+            this.showToast(`Inference completed for "${name}" [${modeLabel}]${degraded} — missing fields only`, 'ok');
+            if (this.selectedSpec && this.selectedSpec.name === name) {
+              this.currentProfile = await fetch(`/admin/specs/${name}/profile/json`).then(r => r.json()).catch(() => null);
+              const p = this.currentProfile || {};
+              this.globalForm.locale = p.locale || '';
+              this.globalForm.dataset = Object.assign({}, p.dataset || {});
+              this.globalForm.relations = Object.entries(p.relations || {}).map(([s, t]) => ({ source: s, target: t }));
+              this.globalForm.denormalized = Object.entries(p.denormalized || {}).map(([s, v]) => ({ source: s, value: v }));
+              this.selectedSpec.profile = true;
+            }
+          } else {
+            this.showToast(data.error ?? 'Inference error', 'err');
+          }
+          await this.refresh();
+        },
+
+        async deleteProfile(name) {
+          if (!confirm(`Remove profile for "${name}"?`)) return;
+          const r = await fetch(`/admin/specs/${name}/profile/delete`, { method: 'POST' });
+          const data = await r.json();
+          this.showToast(r.ok ? `Profile removed from "${name}"` : data.error, r.ok ? 'ok' : 'err');
+          if (r.ok && this.selectedSpec && this.selectedSpec.name === name) {
+            this.selectedSpec.profile = false;
+            this.currentProfile = { overrides: {}, fixtures: {} };
+            this.globalForm = { locale: '', dataset: {}, relations: [], denormalized: [] };
+          }
+          await this.refresh();
+        },
+
+        // ═══════════════════════════════════════════════════
+        // SPEC DETAIL NAVIGATION
+        // ═══════════════════════════════════════════════════
+
+        async openSpec(spec) {
+          this.selectedSpec = spec;
+          this.schema = null;
+          this.currentProfile = null;
+          this.specResources = [];
+          this.specRelations = [];
+          this.specDenormalized = [];
+          this.globalForm = { locale: '', dataset: {}, relations: [], denormalized: [] };
+          this.endpointSearch = '';
+          this.currentView = 'spec-detail';
+          try {
+            const [schemaRes, profileRes, resourcesRes] = await Promise.all([
+              fetch(`/admin/specs/${spec.name}/schema`),
+              fetch(`/admin/specs/${spec.name}/profile/json`),
+              fetch(`/admin/specs/${spec.name}/resources`)
+            ]);
+            this.schema = schemaRes.ok ? await schemaRes.json() : null;
+            this.currentProfile = profileRes.ok ? await profileRes.json() : { overrides: {}, fixtures: {} };
+            if (resourcesRes.ok) {
+              const rd = await resourcesRes.json();
+              this.specResources = rd.resources || [];
+              this.specRelations = rd.relations || [];
+              this.specDenormalized = rd.denormalized || [];
+            }
+            // Pre-fill globalForm from profile
+            const p = this.currentProfile || {};
+            this.globalForm.locale = p.locale || '';
+            this.globalForm.dataset = Object.assign({}, p.dataset || {});
+            this.globalForm.relations = Object.entries(p.relations || {}).map(([s, t]) => ({ source: s, target: t }));
+            this.globalForm.denormalized = Object.entries(p.denormalized || {}).map(([s, v]) => ({ source: s, value: v }));
+          } catch {
+            this.showToast('Failed to load spec detail', 'err');
+          }
+        },
+
+        async saveGlobalSettings() {
+          // Merge globalForm into the current profile and PUT it back
+          const profile = JSON.parse(JSON.stringify(this.currentProfile || {}));
+          profile.locale = this.globalForm.locale || null;
+
+          // Dataset: only include non-empty entries
+          profile.dataset = {};
+          for (const [k, v] of Object.entries(this.globalForm.dataset)) {
+            if (v !== null && v !== '' && v !== undefined) profile.dataset[k] = parseInt(v);
+          }
+
+          // Relations: convert array of {source, target} back to map
+          profile.relations = {};
+          for (const rel of this.globalForm.relations) {
+            if (rel.source && rel.target) profile.relations[rel.source] = rel.target;
+          }
+
+          // Denormalized: convert array of {source, value} back to map
+          profile.denormalized = {};
+          for (const d of this.globalForm.denormalized) {
+            if (d.source && d.value) profile.denormalized[d.source] = d.value;
+          }
+
+          const r = await fetch(`/admin/specs/${this.selectedSpec.name}/profile/json`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(profile)
+          });
+          if (r.ok) {
+            this.currentProfile = await r.json();
+            this.selectedSpec.profile = true;
+            this.showToast('Global settings saved', 'ok');
+            await this.refresh();
+          } else {
+            const d = await r.json().catch(() => ({}));
+            this.showToast(d.error ?? 'Save error', 'err');
+          }
+        },
+
+        startRename() {
+          this.renameValue = this.selectedSpec.name;
+          this.renaming = true;
+          this.$nextTick(() => this.$el.querySelector('input[placeholder="new name"]')?.focus());
+        },
+
+        async confirmRename() {
+          const newName = this.renameValue.trim();
+          if (!newName || newName === this.selectedSpec.name) { this.renaming = false; return; }
+          const r = await fetch(`/admin/specs/${this.selectedSpec.name}/rename`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ newName })
+          });
+          const data = await r.json().catch(() => ({}));
+          if (r.ok) {
+            this.showToast(`Renamed: "${this.selectedSpec.name}" → "${newName}"`, 'ok');
+            this.selectedSpec.name = newName;
+            this.renaming = false;
+            await this.refresh();
+          } else {
+            this.showToast(data.error ?? 'Rename error', 'err');
+          }
+        },
+
+        backToList() {
+          const hasDirty = Object.keys(this.dirtyEndpoints).length > 0;
+          if (hasDirty && !confirm('You have unsaved changes. Leave anyway?')) return;
+          this.currentView = 'list';
+          this.selectedSpec = null;
+          this.schema = null;
+          this.currentProfile = null;
+          this.specResources = [];
+          this.specRelations = [];
+          this.specDenormalized = [];
+          this.globalForm = { locale: '', dataset: {}, relations: [], denormalized: [] };
+          this.dirtyEndpoints = {};
+          this.renaming = false;
+        },
+
+        filteredEndpoints() {
+          if (!this.schema) return [];
+          const q = this.endpointSearch.trim().toLowerCase();
+          if (!q) return this.schema.endpoints;
+          return this.schema.endpoints.filter(ep =>
+            ep.path.toLowerCase().includes(q) || ep.method.toLowerCase().includes(q)
+          );
+        },
+
+        isEndpointOverridden(ep) {
+          if (!this.currentProfile) return false;
+          const ov = this.currentProfile.overrides?.[ep.path]?.[ep.method];
+          return ov != null && Object.keys(ov).some(k => k !== 'fields' ? ov[k] != null : Object.keys(ov.fields || {}).length > 0);
+        },
+
+        // ═══════════════════════════════════════════════════
+        // ENDPOINT CONFIG
+        // ═══════════════════════════════════════════════════
+
+        openEndpointConfig(endpoint) {
+          this.selectedEndpoint = endpoint;
+          this.expandedField = null;
+          this.prefillEndpointForm(endpoint);
+          this.currentView = 'endpoint-config';
+        },
+
+        confirmNavBack() {
+          const key = this.selectedEndpoint ? this.endpointKey(this.selectedEndpoint) : null;
+          if (key && this.dirtyEndpoints[key] && !confirm('You have unsaved changes. Leave anyway?')) return;
+          this.currentView = 'spec-detail';
+          this.selectedEndpoint = null;
+        },
+
+        endpointKey(ep) {
+          return ep.method + ' ' + ep.path;
+        },
+
+        prefillEndpointForm(endpoint) {
+          const override = this.currentProfile?.overrides?.[endpoint.path]?.[endpoint.method] || {};
+          const fields = {};
+          endpoint.fields.forEach(f => {
+            const fc = (override.fields || {})[f.name] || {};
+            let mode = 'none';
+            let fakerValue = '';
+            if (fc.faker) {
+              mode = 'faker';
+              fakerValue = fc.faker;
+            } else if (fc.pattern) {
+              mode = 'pattern';
+            } else if (fc.enum && fc.enum.length > 0) {
+              mode = 'enum';
+            } else if (f.suggestions && f.suggestions.length > 0 && f.suggestions[0].score >= 0.50) {
+              mode = 'faker';
+              fakerValue = f.suggestions[0].expression;
+            }
+            fields[f.name] = {
+              mode,
+              faker: fakerValue,
+              pattern: fc.pattern || '',
+              enumEntries: mode === 'enum'
+                ? (fc.enum || []).map((v, i) => ({ value: v, weight: (fc.distribution || [])[i] || 1 }))
+                : []
+            };
+          });
+          this.endpointForm = {
+            latency: override.latency || '',
+            count: override.count != null ? String(override.count) : '',
+            seed: override.seed != null ? String(override.seed) : '',
+            forceStatus: override.forceStatus != null ? String(override.forceStatus) : '',
+            optionalProbability: override.optionalProbability != null ? String(override.optionalProbability) : '',
+            maxSchemaDepth: override.maxSchemaDepth != null ? String(override.maxSchemaDepth) : '',
+            fields
+          };
+        },
+
+        markDirty() {
+          if (!this.selectedEndpoint) return;
+          const key = this.endpointKey(this.selectedEndpoint);
+          this.dirtyEndpoints = { ...this.dirtyEndpoints, [key]: true };
+        },
+
+        async saveEndpoint() {
+          if (!this.selectedEndpoint || !this.selectedSpec) return;
+          this.savingEndpoint = true;
+
+          const override = this.buildEndpointOverride();
+          const profile = JSON.parse(JSON.stringify(this.currentProfile || { overrides: {}, fixtures: {} }));
+          const path = this.selectedEndpoint.path;
+          const method = this.selectedEndpoint.method;
+
+          if (!profile.overrides) profile.overrides = {};
+          if (!profile.overrides[path]) profile.overrides[path] = {};
+
+          if (Object.keys(override).length === 0) {
+            delete profile.overrides[path][method];
+            if (Object.keys(profile.overrides[path]).length === 0) {
+              delete profile.overrides[path];
+            }
+          } else {
+            profile.overrides[path][method] = override;
+          }
+
+          const r = await fetch(`/admin/specs/${this.selectedSpec.name}/profile/json`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(profile)
+          });
+          const data = await r.json();
+          this.savingEndpoint = false;
+
+          if (r.ok) {
+            this.currentProfile = profile;
+            const key = this.endpointKey(this.selectedEndpoint);
+            const d = { ...this.dirtyEndpoints };
+            delete d[key];
+            this.dirtyEndpoints = d;
+            this.showToast('Saved', 'ok');
+            await this.loadSpecs();
+          } else {
+            this.showToast(data.error || 'Save failed', 'err');
+          }
+        },
+
+        async clearEndpointOverride() {
+          if (!confirm('Clear all overrides for this endpoint?')) return;
+          // reset form then save
+          const endpoint = this.selectedEndpoint;
+          this.endpointForm = { latency: '', count: '', seed: '', forceStatus: '', optionalProbability: '', maxSchemaDepth: '', fields: {} };
+          endpoint.fields.forEach(f => {
+            this.endpointForm.fields[f.name] = { mode: 'none', faker: '', pattern: '', enumEntries: [] };
+          });
+          this.markDirty();
+          await this.saveEndpoint();
+        },
+
+        buildEndpointOverride() {
+          const f = this.endpointForm;
+          const override = {};
+          if (f.latency) override.latency = f.latency;
+          if (f.count !== '') override.count = parseInt(f.count);
+          if (f.seed !== '') override.seed = parseInt(f.seed);
+          if (f.forceStatus !== '') override.forceStatus = parseInt(f.forceStatus);
+          if (f.optionalProbability !== '') override.optionalProbability = parseFloat(f.optionalProbability);
+          if (f.maxSchemaDepth !== '') override.maxSchemaDepth = parseInt(f.maxSchemaDepth);
+
+          const fields = {};
+          Object.entries(f.fields || {}).forEach(([name, fs]) => {
+            if (fs.mode === 'faker' && fs.faker) {
+              fields[name] = { faker: fs.faker };
+            } else if (fs.mode === 'pattern' && fs.pattern) {
+              fields[name] = { pattern: fs.pattern };
+            } else if (fs.mode === 'enum') {
+              const validEntries = (fs.enumEntries || []).filter(e => e.value);
+              if (validEntries.length > 0) {
+                fields[name] = {
+                  enum: validEntries.map(e => e.value),
+                  distribution: validEntries.map(e => e.weight || 1)
+                };
+              }
+            }
+          });
+          if (Object.keys(fields).length > 0) override.fields = fields;
+          return override;
+        },
+
+        hasFixture(ep) {
+          if (!this.currentProfile || !ep) return false;
+          return !!(this.currentProfile.fixtures?.[ep.path]?.[ep.method]);
+        },
+
+        // ═══════════════════════════════════════════════════
+        // FIELD HELPERS
+        // ═══════════════════════════════════════════════════
+
+        toggleField(name) {
+          this.expandedField = this.expandedField === name ? null : name;
+        },
+
+        getFieldMode(name) {
+          return this.endpointForm.fields[name]?.mode || 'none';
+        },
+
+        setFieldMode(name, mode) {
+          if (!this.endpointForm.fields[name]) {
+            this.endpointForm.fields[name] = { mode: 'none', faker: '', pattern: '', enumEntries: [] };
+          }
+          this.endpointForm.fields[name] = { ...this.endpointForm.fields[name], mode };
+          if (mode === 'enum' && (!this.endpointForm.fields[name].enumEntries || this.endpointForm.fields[name].enumEntries.length === 0)) {
+            this.endpointForm.fields[name].enumEntries = [{ value: '', weight: 1 }];
+          }
+        },
+
+        getFieldFaker(name) {
+          return this.endpointForm.fields[name]?.faker || '';
+        },
+
+        setFieldFaker(name, val) {
+          if (!this.endpointForm.fields[name]) return;
+          this.endpointForm.fields[name] = { ...this.endpointForm.fields[name], faker: val };
+        },
+
+        getFieldPattern(name) {
+          return this.endpointForm.fields[name]?.pattern || '';
+        },
+
+        setFieldPattern(name, val) {
+          if (!this.endpointForm.fields[name]) return;
+          this.endpointForm.fields[name] = { ...this.endpointForm.fields[name], pattern: val };
+        },
+
+        getFieldEnumEntries(name) {
+          return this.endpointForm.fields[name]?.enumEntries || [];
+        },
+
+        addEnumEntry(name) {
+          if (!this.endpointForm.fields[name]) return;
+          const entries = [...(this.endpointForm.fields[name].enumEntries || []), { value: '', weight: 1 }];
+          this.endpointForm.fields[name] = { ...this.endpointForm.fields[name], enumEntries: entries };
+        },
+
+        removeEnumEntry(name, idx) {
+          if (!this.endpointForm.fields[name]) return;
+          const entries = [...(this.endpointForm.fields[name].enumEntries || [])];
+          entries.splice(idx, 1);
+          this.endpointForm.fields[name] = { ...this.endpointForm.fields[name], enumEntries: entries };
+        },
+
+        updateEnumEntry(name, idx, key, val) {
+          if (!this.endpointForm.fields[name]) return;
+          const entries = [...(this.endpointForm.fields[name].enumEntries || [])];
+          entries[idx] = { ...entries[idx], [key]: val };
+          this.endpointForm.fields[name] = { ...this.endpointForm.fields[name], enumEntries: entries };
+        },
+
+        filteredFakers(field) {
+          if (!field) return FAKER_CATALOG;
+          const fmt = field.format ? field.format.toLowerCase() : null;
+          const typ = field.type ? field.type.toLowerCase() : 'string';
+          if (fmt) {
+            const byFormat = FAKER_CATALOG.filter(fc => fc.formats.map(f => f.toLowerCase()).includes(fmt));
+            if (byFormat.length > 0) return byFormat;
+          }
+          return FAKER_CATALOG.filter(fc => fc.types.includes(typ));
+        },
+
+        // ═══════════════════════════════════════════════════
+        // UTILITIES
+        // ═══════════════════════════════════════════════════
+
+        showToast(msg, type) {
+          this.toast = { msg, type };
+          setTimeout(() => this.toast = null, 4000);
+        },
+
+        formatDate(dt) {
+          if (!dt) return '—';
+          return new Date(dt).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+        }
+      };
+    }
+  </script>
+</body>
+</html>

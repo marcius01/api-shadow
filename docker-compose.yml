@@ -1,0 +1,13 @@
+services:
+  api-shadow:
+    image: api-shadow:latest
+    ports:
+      - "8080:8080"   # mock API + admin UI
+      - "8090:8090"   # management (Swagger UI, health)
+    volumes:
+      - ./data:/work/data     # H2 database persistence
+      - ./models:/work/models # ONNX embedding model (lazy download on first use)
+    environment:
+      QUARKUS_DATASOURCE_JDBC_URL: "jdbc:h2:file:/work/data/api-shadow;AUTO_SERVER=TRUE"
+      MOCK_FAKER_SUGGESTIONS_MODEL_DIR: "/work/models"
+    restart: unless-stopped
